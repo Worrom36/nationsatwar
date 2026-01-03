@@ -1,0 +1,35 @@
+# DCS specific
+*.miz
+*.log
+*.tmp
+
+# Lua
+*.luac
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# MOOSE (if not tracking)
+Scripts/MOOSE/
+Tools/Scripts/MOOSE/
+
+# Build/Output
+Missions/Production/*.miz
+*.zip
+
+# State files
+Config/TerritorialConquest/*.json
+*.json.bak
+
+# Logs
+logs/
+
