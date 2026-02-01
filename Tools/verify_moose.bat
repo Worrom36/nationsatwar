@@ -2,7 +2,10 @@
 REM ============================================
 REM MOOSE Verification Script
 REM Checks if MOOSE is properly installed
+REM Run from repo root or from Tools/ - script cd's to repo root
 REM ============================================
+
+cd /d "%~dp0.."
 
 echo ============================================
 echo MOOSE Installation Verification
@@ -10,8 +13,8 @@ echo ============================================
 echo.
 
 set "MOOSE_DIR=Scripts\MOOSE"
-set "MOOSE_LUA=%MOOSE_DIR%\MOOSE.lua"
-set "MOOSE_CORE=%MOOSE_DIR%\Core"
+set "MOOSE_LOADER=%MOOSE_DIR%\Moose Setup\Moose Templates\Moose_Dynamic_Loader.lua"
+set "MOOSE_MODULES=%MOOSE_DIR%\Moose Development\Moose\Modules.lua"
 
 echo Checking MOOSE installation...
 echo.
@@ -28,11 +31,11 @@ if not exist "%MOOSE_DIR%" (
 
 echo [OK] MOOSE directory exists: %MOOSE_DIR%
 
-REM Check for MOOSE.lua
-if exist "%MOOSE_LUA%" (
-    echo [OK] MOOSE.lua found
+REM Check for Dynamic Loader (used by Init.lua)
+if exist "%MOOSE_LOADER%" (
+    echo [OK] Moose_Dynamic_Loader.lua found
 ) else (
-    echo [FAIL] MOOSE.lua not found at: %MOOSE_LUA%
+    echo [FAIL] Dynamic Loader not found: %MOOSE_LOADER%
     echo.
     echo MOOSE installation appears incomplete.
     echo Please reinstall MOOSE.
@@ -41,19 +44,26 @@ if exist "%MOOSE_LUA%" (
     exit /b 1
 )
 
-REM Check for Core directory
-if exist "%MOOSE_CORE%" (
-    echo [OK] Core directory found
+REM Check for Moose Development / Modules
+if exist "%MOOSE_MODULES%" (
+    echo [OK] Moose Development\Modules.lua found
 ) else (
-    echo [WARNING] Core directory not found: %MOOSE_CORE%
+    echo [WARNING] Moose Development\Modules.lua not found
     echo Some MOOSE features may not work.
 )
 
-REM Check for other important directories
+REM Optional: MOOSE framework Missions (inside Scripts\MOOSE)
 if exist "%MOOSE_DIR%\Missions" (
-    echo [OK] Missions directory found
+    echo [OK] MOOSE framework Missions folder found
 ) else (
-    echo [INFO] Missions directory not found (optional)
+    echo [INFO] MOOSE framework Missions not found (optional)
+)
+
+REM Project Missions folder (nationsatwar\Missions)
+if exist "Missions" (
+    echo [OK] Project Missions folder found: Missions\
+) else (
+    echo [INFO] Project Missions folder not found: Missions\
 )
 
 echo.

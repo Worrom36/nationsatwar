@@ -26,8 +26,7 @@ Tools/Scripts/MOOSE/
 Missions/Production/*.miz
 *.zip
 
-# State files
-Config/TerritorialConquest/*.json
+# State / cache
 *.json.bak
 
 # Logs

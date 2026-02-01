@@ -1,66 +1,41 @@
-# DCS Territorial Conquest Mission
+# DCS Mission – MOOSE
 
-A dynamic territorial control mission for DCS World using the MOOSE framework.
+Minimal project for DCS World missions using the [MOOSE](https://github.com/FlightControl-Master/MOOSE) framework. Nations at War mission logic is loaded via `Scripts/nationsatwar/Loader.lua`.
 
-## Project Structure
+## Structure
 
 ```
-DCS/
-├── Scripts/                    # All Lua scripts
-│   ├── MOOSE/                 # MOOSE framework (link or copy)
-│   └── TerritorialConquest/   # Mission-specific scripts
-├── Missions/                   # Mission files (.miz)
-│   └── Development/           # Development/test missions
-├── Docs/                       # Documentation
-└── Tools/                      # Development tools
+nationsatwar/
+  Scripts/
+    Init.lua           # Loads MOOSE, then nationsatwar/Loader.lua
+    nationsatwar/      # Nations at War scripts (Loader.lua, Config, Zones, SpawnHelper, Init)
+    MOOSE/             # MOOSE framework (install via Tools)
+  Missions/         # Missions folder – put .miz files here
+    Development/    # Development/test missions
+  Tools/            # MOOSE install/verify scripts
 ```
 
-## Quick Start
+## Quick start
 
-1. **Setup MOOSE**: Run `Tools\install_moose.ps1` to automatically download and install MOOSE
-   - Or use `Tools\install_moose_manual.bat` for manual installation
-   - Verify installation with `Tools\verify_moose.bat`
-2. **Create Mission**: Use DCS Mission Editor to create base mission
-3. **Load Scripts**: Add scripts to mission file
-4. **Configure**: Edit `Scripts\TerritorialConquest\Config.lua`
-5. **Test**: Load mission in DCS and test
+1. **Install MOOSE** (from repo root):
+   ```powershell
+   cd Tools
+   .\install_moose.ps1
+   ```
+   Or run `install_moose_manual.bat` for manual steps. Use `verify_moose.bat` to check the install.
 
-## Development
+2. **Set script path**: edit `Scripts/Init.lua` and set `scriptPath` to the full path to your `Scripts` folder (see SETUP_AND_TEST.md).
 
-See `Docs/` for detailed documentation:
-- `TERRITORIAL_CONQUEST_PLAN.md` - Complete system design
-- `MOOSE_DEV_ENVIRONMENT_SETUP.md` - Development setup guide
-- `DCS_MISSION_EDITOR_REQUIREMENTS.md` - Editor requirements
-- `INSTALLATION_STATUS.md` - Current installation and system status
-- `DEVELOPMENT_CHECKLIST.md` - Development progress tracking
-- `HOW_TO_ADD_SCRIPTS_TO_MISSION.md` - Script integration guide
-- `QUICK_START.md` - Quick start guide
-- `SETUP_INSTRUCTIONS.md` - Detailed setup instructions
+3. **Create a mission** in the DCS Mission Editor and save it under `Missions/Development/`.
 
-## Status
+4. **Add the loader** to the mission: trigger MISSION START → DO SCRIPT FILE → `Scripts/Init.lua`. To change Nations at War behavior, edit files under `Scripts/nationsatwar/` (only `Init.lua` in the mission needs to point at the repo).
 
-✅ **Phase 1 Complete** - Foundation & Territory System Operational
+## Requirements
 
-### Current Features
-- ✅ MOOSE framework integration
-- ✅ Territory management system (2 territories configured)
-- ✅ Factory management (3 factories registered and working)
-- ✅ Ground unit (tank column) spawning system
-- ✅ Event handling system
-- ✅ Player interface framework
-- ✅ State persistence framework
-- ✅ In-game status messages with system diagnostics
-- ✅ Comprehensive error handling
-- ✅ Late-activated group detection and listing
+- DCS World
+- MOOSE in `Scripts/MOOSE/` (same layout as the official MOOSE repo after extraction)
 
-### Mission Editor Integration
-- ✅ Factories placed: Factory_Alpha, Factory_Bravo, Factory_Charlie
-- ✅ Tank templates: Tank_Column_Template_Attacking, Tank_Column_Template_Defending
-  - Automatic registration for late-activated groups working
+## Notes
 
-### Next Steps
-- Implement territory capture logic
-- Add player commands and F10 menus
-- Test tank column spawning and movement
-- Test full gameplay loop
-
+- `Init.lua` must use the full path to your `Scripts` folder in `scriptPath`; see SETUP_AND_TEST.md.
+- MOOSE is not included in the repo; install it with the Tools scripts or by copying MOOSE into `Scripts/MOOSE/`.
