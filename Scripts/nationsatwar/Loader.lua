@@ -8,8 +8,13 @@ end
 
 local ok, err = pcall(function()
     dofile(path .. "Config.lua")
+    dofile(path .. "CapturableZones.lua")
     dofile(path .. "Zones.lua")
+    dofile(path .. "RenderDigits.lua")
     dofile(path .. "SpawnHelper.lua")
+    dofile(path .. "ZoneMovement.lua")
+    dofile(path .. "EventHandlers.lua")
+    dofile(path .. "ZoneCommands.lua")
     dofile(path .. "Init.lua")
 end)
 
