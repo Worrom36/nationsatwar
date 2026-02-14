@@ -16,8 +16,10 @@ nationsatwar/
       SpawnHelper.lua     # Delayed spawn at coords
       ZoneMovement.lua    # Kill handler, redistribution, health (A+B+C), 1 Hz update
       EventHandlers.lua   # Mission/event wiring
-      ZoneCommands.lua    # F10 commands: Swap, Kill All, Respawn, Spawn Counter, Kill One, Kill Two Fast
-      Init.lua            # F10 menu, zone init, spawn defenders
+      ZoneCommands.lua    # F10 commands: Swap, Kill All, Respawn, Spawn Counter, Kill One, Kill Two Fast, Kill Half
+      FactoryProduction.lua   # Factory tank production (TanksPerMinute, FactoryTankCap)
+      FactoryReinforcements.lua  # Attacking reinforcements when zone health drops
+      Init.lua            # F10 menu, zone init, spawn defenders, replenishment timers
     MOOSE/                # MOOSE framework (install via Tools)
   Missions/               # Missions folder – put .miz files here
     Development/          # Development/test missions
@@ -56,11 +58,19 @@ nationsatwar/
   - **Spawn Counter** – spawn one opposing unit at center.
   - **Kill One** – kill one defender and redistribute.
   - **Kill Two Fast** – kill one defender, then a second 0.5 s later.
+  - **Kill Half** – kill half of the zone’s defender groups and redistribute.
 
-Zone health (0–100) is shown as two digits over each zone on the F10 map; updates are queued and redrawn after a short delay.
+Zone health (0–100) is shown as two digits over each zone on the F10 map; updates are queued and redrawn after a short delay. Capture is by C-drain only: when only enemy units are in the zone, the last 30 “hitpoints” (C) drain at 1/sec; at 0 the zone is captured.
 
 ## Notes
 
 - `Init.lua` must use the full path to your `Scripts` folder in `scriptPath`; see SETUP_AND_TEST.md.
 - MOOSE is not included in the repo; install it with the Tools scripts or by copying MOOSE into `Scripts/MOOSE/`.
-- **Zones**: Each capturable zone needs its own late-activated group templates in the Mission Editor. In `Config.lua`, `ZoneUnits[zoneName]` lists one blue and one red template per zone; duplicate the group in the ME and name it exactly as in config (e.g. `NaW_Factory_1INF_B` for Anapa_Factory blue) so each zone spawns its own set of units.
+- **Zones**: Each capturable zone needs its own late-activated group templates in the Mission Editor. In `Config.lua`, `ZoneUnits[zoneName]` lists one blue and one red template per zone; duplicate the group in the ME and name it exactly as in config (e.g. `Anapa_FactoryA_1INF_B` for Anapa_FactoryA blue) so each zone spawns its own set of units.
+
+## Config (Scripts/nationsatwar/Config.lua)
+
+- **Zone replenishment** (refill lost defenders at a zone; unrelated to reinforcements): `EnableZoneReplenishment`, `FactoryReplenishIntervalSec`, `AirfieldReplenishIntervalSec`, `DefaultReplenishIntervalSec`. Replenishment does not run while an enemy unit is in the zone.
+- **Defender count per zone**: `DefenderRingSlots`, `DefenderSquareSlots` (default 12 ring + 4 square).
+- **Factory production**: `TanksPerMinute`, `FactoryTankCap`; factory tank count resets to 0 on capture.
+- **Attacking reinforcements**: when a zone’s health is at or below `ReinforcementHealthThreshold` for `ReinforcementDelaySec` seconds, the nearest factory per faction can send units to that zone. Controlled by `EnableAttackingReinforcements`, `ReinforcementTemplates`, `ReinforcementIdleSec`, `ReinforcementAirfieldDespawnSec`, etc. On zone capture, attacking reinforcement units are removed (or despawn after a delay for airfields) and their count is returned to the source factory.

@@ -3,6 +3,13 @@
 NationsAtWar_ZoneData = NationsAtWar_ZoneData or {}
 NationsAtWar_GroupToZone = NationsAtWar_GroupToZone or {}
 
+local function getDefenderSlots()
+    local c = NationsAtWarConfig
+    local r = (c and type(c.DefenderRingSlots) == "number" and c.DefenderRingSlots > 0) and c.DefenderRingSlots or 12
+    local s = (c and type(c.DefenderSquareSlots) == "number" and c.DefenderSquareSlots > 0) and c.DefenderSquareSlots or 4
+    return r, s
+end
+
 local function isGroupAlive(group)
     if not group then return false end
     if group.IsAlive and group:IsAlive() then return true end
@@ -18,12 +25,13 @@ end
 local function areAllDefendersDead(zoneName)
     local data = NationsAtWar_ZoneData and NationsAtWar_ZoneData[zoneName]
     if not data then return true end
+    local ringSlots, squareSlots = getDefenderSlots()
     local ringGroups, squareGroups = data.ringGroups or {}, data.squareGroups or {}
-    for slot = 1, 12 do
+    for slot = 1, ringSlots do
         local g = ringGroups[slot]
         if g and isGroupAlive(g) then return false end
     end
-    for slot = 1, 4 do
+    for slot = 1, squareSlots do
         local g = squareGroups[slot]
         if g and isGroupAlive(g) then return false end
     end
@@ -182,26 +190,29 @@ function NationsAtWar_HasAnyOutsideFriendlyInZone(zoneName)
 end
 
 --- Perform capture: set owner to other team, redraw F10, spawn new defenders (defenders already destroyed).
+--- Resets captured factory tank count to 0 first, then removes previous owner's reinforcements and returns their count to source factory.
 function NationsAtWar_DoZoneCapture(zoneName)
     if not zoneName then return end
+    if NationsAtWar_KillZoneStatics then NationsAtWar_KillZoneStatics(zoneName) end
     local owner = NationsAtWar_GetZoneOwner and NationsAtWar_GetZoneOwner(zoneName)
     if not owner then return end
     local other = (owner == "red") and "blue" or "red"
     if NationsAtWar_SetZoneOwner then NationsAtWar_SetZoneOwner(zoneName, other) end
+    if NationsAtWar_OnZoneCaptured then NationsAtWar_OnZoneCaptured(zoneName, owner) end
     if NationsAtWar_SetZoneCValue then NationsAtWar_SetZoneCValue(zoneName, 30) end
     if NationsAtWar_RedrawZoneOnMap then NationsAtWar_RedrawZoneOnMap(zoneName) end
     if NationsAtWar_Log then
         NationsAtWar_Log("info", "Zone [%s]: captured by %s, spawning defenders", zoneName, other)
     end
     NationsAtWar_SpawnZoneDefenders(zoneName)
+    if NationsAtWar_ZoneHasStatics and NationsAtWar_ZoneHasStatics(zoneName) and NationsAtWar_SpawnZoneStatics and timer and timer.scheduleFunction and timer.getTime then
+        timer.scheduleFunction(function() NationsAtWar_SpawnZoneStatics(zoneName) end, nil, timer.getTime() + 3)
+    end
 end
 
---- If all defenders dead and other team has units in zone, trigger capture. Call after a defender kill.
+--- Capture is only via C drain (0-30, -1/sec when enemy alone). No instant capture when defenders die.
 function NationsAtWar_CheckAndCaptureZone(zoneName)
-    if not zoneName then return end
-    if not areAllDefendersDead(zoneName) then return end
-    if not hasOtherTeamUnitsInZone(zoneName) then return end
-    NationsAtWar_DoZoneCapture(zoneName)
+    -- Intentionally no-op: capture happens only when C reaches 0 in zone health update.
 end
 
 --- Swap zone owner to the other team (capture): kill all defenders, set owner, redraw F10, spawn new owner's defenders.
@@ -212,6 +223,7 @@ function NationsAtWar_SwapZone(zoneName)
     local other = (owner == "red") and "blue" or "red"
     NationsAtWar_KillAllZone(zoneName)
     if NationsAtWar_SetZoneOwner then NationsAtWar_SetZoneOwner(zoneName, other) end
+    if NationsAtWar_OnZoneCaptured then NationsAtWar_OnZoneCaptured(zoneName, owner) end
     if NationsAtWar_RedrawZoneOnMap then
         NationsAtWar_RedrawZoneOnMap(zoneName)
     end
@@ -219,19 +231,24 @@ function NationsAtWar_SwapZone(zoneName)
         NationsAtWar_Log("info", "Zone [%s]: captured by %s, spawning defenders", zoneName, other)
     end
     NationsAtWar_SpawnZoneDefenders(zoneName)
+    if NationsAtWar_ZoneHasStatics and NationsAtWar_ZoneHasStatics(zoneName) and NationsAtWar_SpawnZoneStatics and timer and timer.scheduleFunction and timer.getTime then
+        timer.scheduleFunction(function() NationsAtWar_SpawnZoneStatics(zoneName) end, nil, timer.getTime() + 3)
+    end
 end
 
---- Kill all units spawned by the zone; clear zone data and group-to-zone map.
+--- Kill all units and statics spawned by the zone; clear zone data and group-to-zone map.
 function NationsAtWar_KillAllZone(zoneName)
     if not zoneName then return end
+    if NationsAtWar_KillZoneStatics then NationsAtWar_KillZoneStatics(zoneName) end
     local data = NationsAtWar_ZoneData and NationsAtWar_ZoneData[zoneName]
     if not data then
         if NationsAtWar_Log then NationsAtWar_Log("info", "Zone [%s]: no zone data (no units to kill)", zoneName) end
         return
     end
+    local ringSlots, squareSlots = getDefenderSlots()
     local namesToRemove = {}
     local ringGroups, squareGroups = data.ringGroups or {}, data.squareGroups or {}
-    for slot = 1, 12 do
+    for slot = 1, ringSlots do
         local g = ringGroups[slot]
         if g then
             local name = getGroupName(g)
@@ -239,7 +256,7 @@ function NationsAtWar_KillAllZone(zoneName)
             if g.Destroy and isGroupAlive(g) then pcall(function() g:Destroy() end) end
         end
     end
-    for slot = 1, 4 do
+    for slot = 1, squareSlots do
         local g = squareGroups[slot]
         if g then
             local name = getGroupName(g)
@@ -296,16 +313,22 @@ function NationsAtWar_SpawnZoneDefenders(zoneName)
     end)
 end
 
---- Kill all zone units then respawn for current owner (ring + square).
+--- Kill all zone units and statics then respawn for current owner (ring + square + statics).
 function NationsAtWar_RespawnAllZone(zoneName)
     if not zoneName then return end
     NationsAtWar_KillAllZone(zoneName)
     NationsAtWar_SpawnZoneDefenders(zoneName)
+    if NationsAtWar_ZoneHasStatics and NationsAtWar_ZoneHasStatics(zoneName) and NationsAtWar_SpawnZoneStatics and timer and timer.scheduleFunction and timer.getTime then
+        timer.scheduleFunction(function() NationsAtWar_SpawnZoneStatics(zoneName) end, nil, timer.getTime() + 3)
+    end
 end
 
 --- Replenish one missing defender group at the first dead/empty slot. Used by factory zones on a timer.
+--- No replenishment while an enemy unit is present in the zone.
 function NationsAtWar_ReplenishZone(zoneName)
     if not zoneName then return end
+    if not (NationsAtWarConfig and NationsAtWarConfig.EnableZoneReplenishment == true) then return end
+    if NationsAtWar_HasOtherTeamUnitsInZone and NationsAtWar_HasOtherTeamUnitsInZone(zoneName) then return end
     local data = NationsAtWar_ZoneData and NationsAtWar_ZoneData[zoneName]
     if not data or not data.centerCoord or not data.radius then return end
     local owner = NationsAtWar_GetZoneOwner and NationsAtWar_GetZoneOwner(zoneName) or "red"
@@ -314,17 +337,18 @@ function NationsAtWar_ReplenishZone(zoneName)
     if not ownerUnits or type(ownerUnits) ~= "table" or #ownerUnits == 0 then return end
     local templateName = ownerUnits[1]
     if not templateName or type(templateName) ~= "string" or templateName == "" then return end
+    local ringSlots, squareSlots = getDefenderSlots()
     local ringGroups = data.ringGroups or {}
     local squareGroups = data.squareGroups or {}
     local slot = nil
-    for s = 1, 12 do
+    for s = 1, ringSlots do
         local g = ringGroups[s]
         if not g or not isGroupAlive(g) then slot = s break end
     end
     if not slot then
-        for s = 1, 4 do
+        for s = 1, squareSlots do
             local g = squareGroups[s]
-            if not g or not isGroupAlive(g) then slot = 12 + s break end
+            if not g or not isGroupAlive(g) then slot = ringSlots + s break end
         end
     end
     if not slot then return end
@@ -399,10 +423,11 @@ function NationsAtWar_KillOneZoneUnit(zoneName)
         if NationsAtWar_Log then NationsAtWar_Log("warning", "Zone [%s]: no zone data", zoneName) end
         return
     end
+    local ringSlots, squareSlots = getDefenderSlots()
     local all = {}
     local ringGroups, squareGroups = data.ringGroups or {}, data.squareGroups or {}
-    for slot = 1, 12 do local g = ringGroups[slot]; if g then table.insert(all, g) end end
-    for slot = 1, 4 do local g = squareGroups[slot]; if g then table.insert(all, g) end end
+    for slot = 1, ringSlots do local g = ringGroups[slot]; if g then table.insert(all, g) end end
+    for slot = 1, squareSlots do local g = squareGroups[slot]; if g then table.insert(all, g) end end
     for _, group in ipairs(all) do
         if isGroupAlive(group) then
             local groupName = getGroupName(group)
@@ -440,5 +465,47 @@ function NationsAtWar_KillTwoZoneUnitsFast(zoneName)
         end, nil, timer.getTime() + 0.5)
     else
         NationsAtWar_KillOneZoneUnit(zoneName)
+    end
+end
+
+--- Kill half the zone's defender groups (round down). Clears slots and redistributes once.
+function NationsAtWar_KillHalfZoneUnits(zoneName)
+    if not zoneName then return end
+    local data = NationsAtWar_ZoneData and NationsAtWar_ZoneData[zoneName]
+    if not data or type(data) ~= "table" then
+        if NationsAtWar_Log then NationsAtWar_Log("warning", "Zone [%s]: no zone data", zoneName) end
+        return
+    end
+    local ringSlots, squareSlots = getDefenderSlots()
+    local ringGroups, squareGroups = data.ringGroups or {}, data.squareGroups or {}
+    local alive = {}
+    for slot = 1, ringSlots do
+        local g = ringGroups[slot]
+        if g and isGroupAlive(g) then table.insert(alive, { group = g, ring = slot }) end
+    end
+    for slot = 1, squareSlots do
+        local g = squareGroups[slot]
+        if g and isGroupAlive(g) then table.insert(alive, { group = g, square = slot }) end
+    end
+    local n = #alive
+    if n == 0 then
+        if NationsAtWar_Log then NationsAtWar_Log("warning", "Zone [%s]: no living groups to kill", zoneName) end
+        return
+    end
+    local toKill = math.floor(n / 2)
+    if toKill == 0 then return end
+    for i = 1, toKill do
+        local e = alive[i]
+        local g = e.group
+        local name = getGroupName(g)
+        if name and NationsAtWar_GroupToZone then NationsAtWar_GroupToZone[name] = nil end
+        if e.ring and data.ringGroups then data.ringGroups[e.ring] = nil end
+        if e.square and data.squareGroups then data.squareGroups[e.square] = nil end
+        if g.Destroy then pcall(function() g:Destroy() end) end
+    end
+    if NationsAtWar_RedistributeZone then NationsAtWar_RedistributeZone(zoneName) end
+    if NationsAtWar_UpdateZoneHealthAndDisplay then NationsAtWar_UpdateZoneHealthAndDisplay(zoneName) end
+    if NationsAtWar_Log then
+        NationsAtWar_Log("info", "Zone [%s]: kill half — destroyed %d of %d groups", zoneName, toKill, n)
     end
 end

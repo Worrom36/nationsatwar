@@ -8,7 +8,9 @@ NationsAtWar_ZoneCValue = NationsAtWar_ZoneCValue or {}
 -- Total defender unit count at registration (A = (living count / this) * 50).
 NationsAtWar_ZoneDefenderUnitCount = NationsAtWar_ZoneDefenderUnitCount or {}
 
-local RING_SLOTS = 12
+local _cfg = NationsAtWarConfig
+local RING_SLOTS = (_cfg and type(_cfg.DefenderRingSlots) == "number" and _cfg.DefenderRingSlots > 0) and _cfg.DefenderRingSlots or 12
+local SQUARE_SLOTS = (_cfg and type(_cfg.DefenderSquareSlots) == "number" and _cfg.DefenderSquareSlots > 0) and _cfg.DefenderSquareSlots or 4
 local ROTATION_STEP_RAD = (2 * math.pi) / RING_SLOTS
 local MOVE_ZONE_RADIUS = 25
 local _moveZoneCounter = 0
@@ -126,7 +128,7 @@ local function countLivingDefenderUnits(zoneName)
         if ok and type(count) == "number" then n = n + count end
     end
     for slot = 1, RING_SLOTS do addGroup(ringGroups[slot]) end
-    for slot = 1, 4 do addGroup(squareGroups[slot]) end
+    for slot = 1, SQUARE_SLOTS do addGroup(squareGroups[slot]) end
     return n
 end
 
@@ -147,8 +149,8 @@ function NationsAtWar_RegisterZoneUnits(zoneName, centerCoord, radius, spawnedGr
                 NationsAtWar_GroupToZone[name] = zoneName
                 if idx >= 1 and idx <= RING_SLOTS then
                     ringGroups[idx] = group
-                elseif idx >= 13 and idx <= 16 then
-                    squareGroups[idx - 12] = group
+                elseif idx >= RING_SLOTS + 1 and idx <= RING_SLOTS + SQUARE_SLOTS then
+                    squareGroups[idx - RING_SLOTS] = group
                 end
             end
         end
@@ -183,7 +185,7 @@ function NationsAtWar_GetDefenderGroupNames(zoneName)
             if name then out[name] = true end
         end
     end
-    for slot = 1, 4 do
+    for slot = 1, SQUARE_SLOTS do
         local g = squareGroups[slot]
         if g then
             local name = (g.GetName and g:GetName()) and g:GetName() or nil
@@ -193,15 +195,19 @@ function NationsAtWar_GetDefenderGroupNames(zoneName)
     return out
 end
 
---- Health component A (0-50): based on defender unit count. A = (living count / total at registration) * 50.
+--- Health component A (0-50): based on defender units + statics. A = (living / total) * 50, total/living = units + statics.
 function NationsAtWar_ComputeZoneHealthA(zoneName)
-    local living = countLivingDefenderUnits(zoneName)
-    local total = NationsAtWar_ZoneDefenderUnitCount and NationsAtWar_ZoneDefenderUnitCount[zoneName]
-    if not total or total <= 0 then
+    local livingUnits = countLivingDefenderUnits(zoneName)
+    local totalUnits = NationsAtWar_ZoneDefenderUnitCount and NationsAtWar_ZoneDefenderUnitCount[zoneName]
+    if not totalUnits or totalUnits <= 0 then
         NationsAtWar_ZoneDefenderUnitCount = NationsAtWar_ZoneDefenderUnitCount or {}
         NationsAtWar_ZoneDefenderUnitCount[zoneName] = countLivingDefenderUnits(zoneName)
-        total = NationsAtWar_ZoneDefenderUnitCount[zoneName]
+        totalUnits = NationsAtWar_ZoneDefenderUnitCount[zoneName]
     end
+    local livingStatics = (NationsAtWar_CountLivingZoneStatics and NationsAtWar_CountLivingZoneStatics(zoneName)) or 0
+    local totalStatics = (NationsAtWar_ZoneDefenderStaticCount and NationsAtWar_ZoneDefenderStaticCount[zoneName]) or 0
+    local living = livingUnits + livingStatics
+    local total = (totalUnits or 0) + totalStatics
     if not total or total <= 0 then return 0 end
     return math.floor((living / total) * 50 + 0.5)
 end
@@ -223,7 +229,7 @@ function NationsAtWar_SetZoneCValue(zoneName, value)
     if n then NationsAtWar_ZoneCValue[zoneName] = (n < 0 and 0) or (n > 30 and 30) or n end
 end
 
---- Return coord for slot 1..16 (1–12 ring, 13–16 square). Used by replenish to spawn at a specific slot.
+--- Return coord for slot 1..(RING_SLOTS+SQUARE_SLOTS) (ring then square). Used by replenish to spawn at a specific slot.
 function NationsAtWar_GetZoneSlotCoord(zoneName, slot)
     local data = NationsAtWar_ZoneData and NationsAtWar_ZoneData[zoneName]
     if not data or not data.centerCoord or not data.radius then return nil end
@@ -232,15 +238,15 @@ function NationsAtWar_GetZoneSlotCoord(zoneName, slot)
     if slot >= 1 and slot <= RING_SLOTS then
         local ringCoords = NationsAtWar_GetZoneRingPositions(centerCoord, radius, RING_SLOTS, offset)
         return ringCoords and ringCoords[slot]
-    elseif slot >= 13 and slot <= 16 then
-        local squareCoords = NationsAtWar_GetZoneSquarePositions(centerCoord, radius)
-        local idx = slot - 12
+    elseif slot >= RING_SLOTS + 1 and slot <= RING_SLOTS + SQUARE_SLOTS then
+        local squareCoords = NationsAtWar_GetZoneSquarePositions(centerCoord, radius, SQUARE_SLOTS)
+        local idx = slot - RING_SLOTS
         return squareCoords and squareCoords[idx]
     end
     return nil
 end
 
---- Register one replenished group into an existing zone at the given slot (1–16). Updates ZoneData and GroupToZone.
+--- Register one replenished group into an existing zone at the given slot (1..RING_SLOTS+SQUARE_SLOTS). Updates ZoneData and GroupToZone.
 function NationsAtWar_RegisterZoneUnitReplenish(zoneName, slot, group)
     if not zoneName or not group then return end
     local name = (group.GetName and group:GetName()) and group:GetName() or nil
@@ -251,9 +257,9 @@ function NationsAtWar_RegisterZoneUnitReplenish(zoneName, slot, group)
     if slot >= 1 and slot <= RING_SLOTS then
         data.ringGroups = data.ringGroups or {}
         data.ringGroups[slot] = group
-    elseif slot >= 13 and slot <= 16 then
+    elseif slot >= RING_SLOTS + 1 and slot <= RING_SLOTS + SQUARE_SLOTS then
         data.squareGroups = data.squareGroups or {}
-        data.squareGroups[slot - 12] = group
+        data.squareGroups[slot - RING_SLOTS] = group
     end
     NationsAtWar_ZoneDefenderUnitCount[zoneName] = countLivingDefenderUnits(zoneName)
 end
@@ -282,9 +288,9 @@ function NationsAtWar_RedistributeZone(zoneName)
     end
     data.rotationOffsetRad = offset + dir * ROTATION_STEP_RAD
     -- Square: assign by slot; permute which corner each slot gets.
-    local squareCoords = NationsAtWar_GetZoneSquarePositions(centerCoord, radius)
-    local perm = randomPermutationOfN(4, 4)
-    for slot = 1, 4 do
+    local squareCoords = NationsAtWar_GetZoneSquarePositions(centerCoord, radius, SQUARE_SLOTS)
+    local perm = randomPermutationOfN(SQUARE_SLOTS, math.max(4, SQUARE_SLOTS))
+    for slot = 1, SQUARE_SLOTS do
         local group = squareGroups[slot]
         if group and isGroupAlive(group) then
             nSquareAlive = nSquareAlive + 1
@@ -403,10 +409,11 @@ function NationsAtWar_UpdateZoneHealthAndDisplay(zoneName, opts)
         NationsAtWar_ZoneCValue = NationsAtWar_ZoneCValue or {}
         NationsAtWar_ZoneCValue[zoneName] = 30
     end
-    -- Treat zone as having owner if defenders are registered (don't drain C when GetSize() is 0 right after spawn).
+    -- Treat zone as having owner if defenders or zone statics are present (don't drain C when GetSize() is 0 right after spawn).
     local hasDefenderGroups = data and (next(data.ringGroups or {}) or next(data.squareGroups or {}))
     local hasOwner = (data and countLivingDefenderUnits(zoneName) > 0)
         or hasDefenderGroups
+        or (NationsAtWar_CountLivingZoneStatics and NationsAtWar_CountLivingZoneStatics(zoneName) > 0)
         or (NationsAtWar_HasOwnerUnitsInZone and NationsAtWar_HasOwnerUnitsInZone(zoneName))
     local hasOther = NationsAtWar_HasOtherTeamUnitsInZone and NationsAtWar_HasOtherTeamUnitsInZone(zoneName)
     if data and hasOther and not hasOwner then
@@ -475,4 +482,9 @@ function NationsAtWar_StartZoneHealthUpdate()
             NationsAtWar_Log("info", "Zone health update started (1 Hz)")
         end
     end
+end
+
+--- Route a group to a coordinate (ground move). Used by factory reinforcements.
+function NationsAtWar_RouteGroupToCoord(group, coord)
+    return giveGroupMoveOrder(group, coord)
 end

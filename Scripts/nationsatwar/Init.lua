@@ -75,6 +75,16 @@ if MENU_MISSION and MENU_MISSION_COMMAND then
                 MENU_MISSION_COMMAND:New("Kill Two Fast", zoneSub, function()
                     if NationsAtWar_KillTwoZoneUnitsFast then NationsAtWar_KillTwoZoneUnitsFast(zoneName) end
                 end)
+                MENU_MISSION_COMMAND:New("Kill Half", zoneSub, function()
+                    if NationsAtWar_KillHalfZoneUnits then NationsAtWar_KillHalfZoneUnits(zoneName) end
+                end)
+                MENU_MISSION_COMMAND:New("Destroy All Static", zoneSub, function()
+                    if NationsAtWar_KillZoneStatics then NationsAtWar_KillZoneStatics(zoneName) end
+                end)
+                MENU_MISSION_COMMAND:New("Respawn All Static", zoneSub, function()
+                    if NationsAtWar_KillZoneStatics then NationsAtWar_KillZoneStatics(zoneName) end
+                    if NationsAtWar_SpawnZoneStatics then NationsAtWar_SpawnZoneStatics(zoneName) end
+                end)
             end
         end
     end
@@ -83,6 +93,7 @@ end
 NationsAtWar_Log("info", "Nations at War - Initializing")
 
 NationsAtWar_InitCapturableZones()
+if NationsAtWar_BuildZoneStaticDefinitions then NationsAtWar_BuildZoneStaticDefinitions() end
 if NationsAtWar_InstallZoneMovementHandler then
     NationsAtWar_InstallZoneMovementHandler()
 end
@@ -136,12 +147,17 @@ local function initOneZone(zoneName)
         local spawnCoords = NationsAtWar_GetZoneSpawnPositions(coord, radius)
         NationsAtWar_SpawnGroupsAtCoordsDelayed(ownerUnits, spawnCoords, 3, function(spawned, total, groups)
             if total > 0 then
-                NationsAtWar_Log("info", "Zone [%s] (%s): spawned %d/%d unit groups (12 ring + 4 square)", drawName, owner, spawned, total)
+                local r = (NationsAtWarConfig and type(NationsAtWarConfig.DefenderRingSlots) == "number" and NationsAtWarConfig.DefenderRingSlots > 0) and NationsAtWarConfig.DefenderRingSlots or 12
+                local s = (NationsAtWarConfig and type(NationsAtWarConfig.DefenderSquareSlots) == "number" and NationsAtWarConfig.DefenderSquareSlots > 0) and NationsAtWarConfig.DefenderSquareSlots or 4
+                NationsAtWar_Log("info", "Zone [%s] (%s): spawned %d/%d unit groups (%d ring + %d square)", drawName, owner, spawned, total, r, s)
                 if spawned < total then
                     NationsAtWar_Log("warning", "Zone [%s]: %d groups failed to spawn (check late-activated group names in ME)", drawName, total - spawned)
                 end
                 if groups and #groups > 0 and NationsAtWar_RegisterZoneUnits then
                     NationsAtWar_RegisterZoneUnits(zoneName, coord, radius, groups)
+                    if NationsAtWar_ZoneHasStatics and NationsAtWar_ZoneHasStatics(zoneName) and NationsAtWar_SpawnZoneStatics then
+                        NationsAtWar_SpawnZoneStatics(zoneName)
+                    end
                     local A = NationsAtWar_ComputeZoneHealthA and NationsAtWar_ComputeZoneHealthA(zoneName) or 0
                     local B = (NationsAtWar_HasAnyOutsideFriendlyInZone and NationsAtWar_HasAnyOutsideFriendlyInZone(zoneName)) and 20 or 0
                     local C = (NationsAtWar_ZoneCValue and NationsAtWar_ZoneCValue[zoneName]) or 30
@@ -157,6 +173,9 @@ local function initOneZone(zoneName)
         end)
     else
         NationsAtWar_Log("warning", "Zone [%s]: no ZoneUnits[%s][%s] or empty list; add unit template names in Config.lua", zoneName, zoneName, owner)
+        if NationsAtWar_ZoneHasStatics and NationsAtWar_ZoneHasStatics(zoneName) and NationsAtWar_SpawnZoneStatics then
+            NationsAtWar_SpawnZoneStatics(zoneName)
+        end
     end
 end
 
@@ -169,22 +188,52 @@ end
 
 NationsAtWar_Log("info", "Initialization complete")
 
--- Factory zones: periodic replenishment of lost defender units (interval from Config.ReplenishIntervalSec).
-local factoryZones = NationsAtWarConfig and NationsAtWarConfig.FactoryZones
-local replenishIntervalSec = (NationsAtWarConfig and type(NationsAtWarConfig.ReplenishIntervalSec) == "number") and NationsAtWarConfig.ReplenishIntervalSec or 120
-if factoryZones and type(factoryZones) == "table" and #factoryZones > 0 and timer and timer.scheduleFunction and timer.getTime and replenishIntervalSec > 0 then
-    for _, zoneName in ipairs(factoryZones) do
+-- All zones: periodic replenishment of lost defender units. Interval by type (factory / airfield / default).
+local function zoneInList(zoneName, list)
+    if not zoneName or not list or type(list) ~= "table" then return false end
+    for _, z in ipairs(list) do
+        if z == zoneName then return true end
+    end
+    return false
+end
+local function getReplenishIntervalSec(zoneName)
+    local cfg = NationsAtWarConfig
+    if not cfg then return 300 end
+    if zoneInList(zoneName, cfg.FactoryZones) then
+        return (type(cfg.FactoryReplenishIntervalSec) == "number" and cfg.FactoryReplenishIntervalSec > 0) and cfg.FactoryReplenishIntervalSec or 120
+    end
+    if zoneInList(zoneName, cfg.AirfieldZones) then
+        return (type(cfg.AirfieldReplenishIntervalSec) == "number" and cfg.AirfieldReplenishIntervalSec > 0) and cfg.AirfieldReplenishIntervalSec or 180
+    end
+    return (type(cfg.DefaultReplenishIntervalSec) == "number" and cfg.DefaultReplenishIntervalSec > 0) and cfg.DefaultReplenishIntervalSec or 300
+end
+local zoneMenuZonesReplenish = NationsAtWarConfig and NationsAtWarConfig.ZoneMenuZones
+-- Replenishment timers always run; ReplenishZone no-ops when EnableZoneReplenishment is not true.
+if zoneMenuZonesReplenish and type(zoneMenuZonesReplenish) == "table" and #zoneMenuZonesReplenish > 0 and timer and timer.scheduleFunction and timer.getTime then
+    local started = 0
+    for _, zoneName in ipairs(zoneMenuZonesReplenish) do
         if zoneName and type(zoneName) == "string" and zoneName ~= "" then
-            local function scheduleReplenish()
-                if NationsAtWar_ReplenishZone then NationsAtWar_ReplenishZone(zoneName) end
-                if timer and timer.scheduleFunction and timer.getTime then
-                    timer.scheduleFunction(scheduleReplenish, nil, timer.getTime() + replenishIntervalSec)
+            local intervalSec = getReplenishIntervalSec(zoneName)
+            if intervalSec > 0 then
+                local function scheduleReplenish()
+                    if NationsAtWar_ReplenishZone then NationsAtWar_ReplenishZone(zoneName) end
+                    if timer and timer.scheduleFunction and timer.getTime then
+                        timer.scheduleFunction(scheduleReplenish, nil, timer.getTime() + intervalSec)
+                    end
                 end
+                timer.scheduleFunction(scheduleReplenish, nil, timer.getTime() + intervalSec)
+                started = started + 1
             end
-            timer.scheduleFunction(scheduleReplenish, nil, timer.getTime() + replenishIntervalSec)
         end
     end
-    NationsAtWar_Log("info", "Factory replenish started (%s sec) for %d zone(s)", tostring(replenishIntervalSec), #factoryZones)
+    if started > 0 and NationsAtWar_Log then
+        NationsAtWar_Log("info", "Replenish started for %d zone(s) (factory / airfield / default intervals)", started)
+    end
+end
+
+-- Factory tank production: shared timer (every 60 s), cap from Config, no map display.
+if NationsAtWar_StartFactoryProductionTimer then
+    NationsAtWar_StartFactoryProductionTimer()
 end
 
 -- Delayed ready message (init runs during load)

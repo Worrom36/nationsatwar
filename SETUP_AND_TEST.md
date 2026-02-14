@@ -90,11 +90,11 @@ Now, when the mission starts, DCS will run `Init.lua`, which will load MOOSE.
 4. In `dcs.log`, search for:
    - `Mission Scripts - Initializing`
    - `MOOSE loaded successfully`
-   - `Initialization Complete`
+   - `Initialization Complete` (or Nations at War init / zone health messages)
 
 If you see those lines, MOOSE is loading correctly.
 
-**Optional:** Use the in-game **Radio menu (F10)** or **Messages** to see if MOOSE or your own code prints anything. With the current Init.lua, only log lines appear.
+**Nations at War:** Use the in-game **F10** menu: **Nations at War** → **Last messages** (recent log lines) and **Nations at War** → **Zones** → *[zone]* for Swap, Kill All, Respawn All, Spawn Counter, etc. Zone health (0–100) is shown as digits over each zone on the F10 map. To change behavior (zones, replenishment, reinforcements), edit `Scripts/nationsatwar/Config.lua`; see README.md for main options.
 
 ---
 
@@ -115,6 +115,7 @@ If you see those lines, MOOSE is loading correctly.
 - [ ] `Scripts\Init.lua` updated with full `scriptPath` to your `Scripts` folder.
 - [ ] Mission saved (e.g. in `Missions\Development\`).
 - [ ] Trigger: MISSION START → DO SCRIPT FILE → `Scripts\Init.lua`.
-- [ ] Mission run; `dcs.log` shows “MOOSE loaded successfully” and “Initialization Complete”.
+- [ ] Mission run; `dcs.log` shows “MOOSE loaded successfully” and “Initialization Complete" (or Nations at War init).
+- [ ] F10 → Nations at War → Zones shows zone submenus; zone health digits visible on map.
 
-After that, to change mission logic edit scripts under `Scripts\nationsatwar\`; add or reorder modules in `Loader.lua` so you only need to point the mission at `Scripts\Init.lua`.
+After that, to change mission logic edit scripts under `Scripts\nationsatwar\`. Main tunables (zones, replenishment, reinforcements) are in `Config.lua`; see README.md. Add or reorder modules in `Loader.lua` as needed.

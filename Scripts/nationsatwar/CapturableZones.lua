@@ -25,5 +25,15 @@ function NationsAtWar_SetZoneOwner(zoneName, owner)
     owner = (type(owner) == "string" and owner:lower()) or "red"
     if VALID_OWNERS[owner] then
         NationsAtWar_CapturableZoneOwner[zoneName] = owner
+        -- Reset factory tank count on capture (factory changes hands)
+        local factoryZones = NationsAtWarConfig and NationsAtWarConfig.FactoryZones
+        if factoryZones and type(factoryZones) == "table" then
+            for _, z in ipairs(factoryZones) do
+                if z == zoneName then
+                    if NationsAtWar_ResetFactoryTankCount then NationsAtWar_ResetFactoryTankCount(zoneName) end
+                    break
+                end
+            end
+        end
     end
 end

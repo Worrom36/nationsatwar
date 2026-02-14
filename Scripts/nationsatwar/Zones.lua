@@ -25,6 +25,11 @@ function NationsAtWar_SetZoneHealth(zoneName, value)
     local current = NationsAtWar_ZoneHealth and NationsAtWar_ZoneHealth[zoneName]
     if current == clamped then return end
     NationsAtWar_ZoneHealth[zoneName] = clamped
+    -- Factory reinforcements: when health crosses to or below threshold, trigger once per ownership + idle cooldown.
+    local threshold = (NationsAtWarConfig and type(NationsAtWarConfig.ReinforcementHealthThreshold) == "number") and NationsAtWarConfig.ReinforcementHealthThreshold or 50
+    if clamped <= threshold and (current == nil or current > threshold) and NationsAtWar_OnZoneHealthBelow50 then
+        NationsAtWar_OnZoneHealthBelow50(zoneName)
+    end
 end
 
 function NationsAtWar_GetZone(zoneName)
@@ -57,6 +62,24 @@ function NationsAtWar_GetZoneCoord(zoneName)
         return zone:GetCoordinate(), zoneName, r
     end
     return nil, nil, nil
+end
+
+--- Get zone center as { x, y, z } and radius from mission data (no DCS objects). For use in timer callbacks where coord objects may be invalid.
+function NationsAtWar_GetZoneCenterAndRadius(zoneName)
+    if not zoneName or not env.mission or not env.mission.triggers or not env.mission.triggers.zones then
+        return nil, nil
+    end
+    local nameLower = zoneName:lower()
+    for _, zoneData in pairs(env.mission.triggers.zones) do
+        local name = zoneData.name
+        if name and (name == zoneName or name:lower() == nameLower or name:lower():find(nameLower, 1, true)) then
+            local x = type(zoneData.x) == "number" and zoneData.x or 0
+            local z = type(zoneData.y) == "number" and zoneData.y or 0
+            local r = type(zoneData.radius) == "number" and zoneData.radius > 0 and zoneData.radius or 1000
+            return { x = x, y = 0, z = z }, r
+        end
+    end
+    return nil, nil
 end
 
 function NationsAtWar_DrawZoneOnMap(zoneName, opts)
@@ -95,8 +118,8 @@ function NationsAtWar_GetZoneRingPositions(centerCoord, zoneRadius, n, rotationO
     return coords
 end
 
--- Returns 4 COORDINATEs at half radius (square corners at 45,135,225,315 deg).
-function NationsAtWar_GetZoneSquarePositions(centerCoord, zoneRadius)
+-- Returns up to 4 COORDINATEs at half radius (square corners at 45,135,225,315 deg). Optional count (default 4).
+function NationsAtWar_GetZoneSquarePositions(centerCoord, zoneRadius, count)
     if not centerCoord or not centerCoord.GetVec3 or not COORDINATE or not COORDINATE.NewFromVec2 then
         return {}
     end
@@ -104,9 +127,12 @@ function NationsAtWar_GetZoneSquarePositions(centerCoord, zoneRadius)
     local half = r * 0.5
     local v = centerCoord:GetVec3()
     local cx, cz = v.x, v.z
+    local n = (type(count) == "number" and count >= 0) and math.min(4, count) or 4
     local coords = {}
     local pi = math.pi
-    for _, angleDeg in ipairs({ 45, 135, 225, 315 }) do
+    local angles = { 45, 135, 225, 315 }
+    for i = 1, n do
+        local angleDeg = angles[i]
         local theta = (angleDeg / 180) * pi
         local x = cx + half * math.cos(theta)
         local z = cz + half * math.sin(theta)
@@ -115,10 +141,13 @@ function NationsAtWar_GetZoneSquarePositions(centerCoord, zoneRadius)
     return coords
 end
 
--- Returns 16 COORDINATEs: 12 ring then 4 square (for initial spawn).
+-- Returns ring then square COORDINATEs (for initial spawn). Counts from Config DefenderRingSlots, DefenderSquareSlots.
 function NationsAtWar_GetZoneSpawnPositions(centerCoord, zoneRadius)
-    local ring = NationsAtWar_GetZoneRingPositions(centerCoord, zoneRadius, 12, 0)
-    local square = NationsAtWar_GetZoneSquarePositions(centerCoord, zoneRadius)
+    local cfg = NationsAtWarConfig
+    local ringSlots = (cfg and type(cfg.DefenderRingSlots) == "number" and cfg.DefenderRingSlots > 0) and cfg.DefenderRingSlots or 12
+    local squareSlots = (cfg and type(cfg.DefenderSquareSlots) == "number" and cfg.DefenderSquareSlots > 0) and cfg.DefenderSquareSlots or 4
+    local ring = NationsAtWar_GetZoneRingPositions(centerCoord, zoneRadius, ringSlots, 0)
+    local square = NationsAtWar_GetZoneSquarePositions(centerCoord, zoneRadius, squareSlots)
     local coords = {}
     for _, c in ipairs(ring) do table.insert(coords, c) end
     for _, c in ipairs(square) do table.insert(coords, c) end
@@ -152,6 +181,10 @@ function NationsAtWar_DrawZoneOnMapFromCoord(coord, foundName, radius, opts)
     local center = type(v) == "table" and v.z ~= nil and { x = v.x or 0, y = v.y or 0, z = v.z }
         or { x = v.x or 0, y = 0, z = v.y or 0 }
     if trigger and trigger.action and trigger.action.circleToAll then
+        -- Remove existing circle so redraw (e.g. on capture) shows new color; DCS does not update circle appearance when same id is used. Skip when caller will remove then delay draw.
+        if not opts.skipRemove and trigger.action.removeMark then
+            pcall(trigger.action.removeMark, id)
+        end
         local outlineColor = { color[1] or 0, color[2] or 1, color[3] or 0, alpha }
         local fill = { fillColor[1] or color[1], fillColor[2] or color[2], fillColor[3] or color[3], fillAlpha }
         pcall(trigger.action.circleToAll, coalition, id, center, r, outlineColor, fill, lineType, readonly, idKey)
@@ -165,6 +198,7 @@ function NationsAtWar_DrawZoneOnMapFromCoord(coord, foundName, radius, opts)
 end
 
 --- Redraw zone on F10 map. opts.blink = true: remove health digits then redraw (blink every tick).
+-- Draws new circle with new id (same context as caller so circleToAll works), then removes old circle.
 function NationsAtWar_RedrawZoneOnMap(zoneName, opts)
     if not zoneName then return false end
     opts = opts or {}
@@ -182,6 +216,36 @@ function NationsAtWar_RedrawZoneOnMap(zoneName, opts)
     local drawColor = (zoneColors[owner] and type(zoneColors[owner]) == "table" and #zoneColors[owner] >= 3)
         and zoneColors[owner]
         or { 1, 0, 0 }
+    local idKey = tostring(zoneName)
+    NationsAtWar_ZoneCircleId = NationsAtWar_ZoneCircleId or {}
+    local oldId = NationsAtWar_ZoneCircleId[idKey]
+    NationsAtWar_NextZoneCircleId = NationsAtWar_NextZoneCircleId or 1
+    local newId = NationsAtWar_NextZoneCircleId
+    NationsAtWar_NextZoneCircleId = NationsAtWar_NextZoneCircleId + 1
+    -- Draw new circle first (same context as menu so circleToAll works), then remove old. Use trigger.misc.getZone for DCS-native point/radius.
+    local center, resRadius
+    if trigger and trigger.misc and trigger.misc.getZone then
+        local z = trigger.misc.getZone(zoneName)
+        if z and z.point and z.radius then
+            center, resRadius = z.point, z.radius
+        end
+    end
+    if not center or not resRadius then
+        center, resRadius = NationsAtWar_GetZoneCenterAndRadius and NationsAtWar_GetZoneCenterAndRadius(zoneName)
+    end
+    if center and resRadius and trigger and trigger.action and trigger.action.circleToAll then
+        local outlineColor = { drawColor[1] or 0, drawColor[2] or 1, drawColor[3] or 0, 1 }
+        local fill = { drawColor[1] or 0, drawColor[2] or 1, drawColor[3] or 0, 0.2 }
+        pcall(trigger.action.circleToAll, -1, newId, center, resRadius, outlineColor, fill, 1, true, idKey)
+        NationsAtWar_ZoneCircleId[idKey] = newId
+        if oldId and trigger.action.removeMark then
+            pcall(trigger.action.removeMark, oldId)
+        end
+        NationsAtWar_ZoneHealthUpdateQueue = NationsAtWar_ZoneHealthUpdateQueue or {}
+        NationsAtWar_ZoneHealthUpdateQueue[zoneName] = true
+        if NationsAtWar_ProcessZoneHealthUpdateQueue then NationsAtWar_ProcessZoneHealthUpdateQueue() end
+        return true
+    end
     local ok = NationsAtWar_DrawZoneOnMapFromCoord(coord, zoneName, radius, { color = drawColor, fillAlpha = 0.2, coalition = -1, readonly = true })
     if ok then
         NationsAtWar_ZoneGeometry = NationsAtWar_ZoneGeometry or {}
